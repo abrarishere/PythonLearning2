@@ -1,113 +1,100 @@
-from kivy.app import App
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
-from kivy.uix.progressbar import ProgressBar
-from kivy.clock import Clock
-from kivy.uix.popup import Popup
-import pyautogui
-import pyperclip
-from tqdm import tqdm
+import tkinter as tk
+from tkinter import ttk
 import time
+import pyautogui
+import threading
+import speech_recognition as sr
 
-class AutotyperApp(App):
-    def build(self):
-        self.text_to_type = ""
-        self.typing_speed = 0
-        self.typing_process = None
-        self.progress_value = 0
+class AutoTyperApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("AutoTyper")
 
-        layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
+        self.text_to_type = tk.StringVar(value="")
+        self.speed = tk.StringVar(value="60")
+        self.delay = tk.StringVar(value="3")
 
-        # Label and entry for text input
-        text_label = Label(text="Enter the text you want to type:")
-        layout.add_widget(text_label)
-        self.text_entry = TextInput(multiline=False)
-        layout.add_widget(self.text_entry)
+        # Entry for user input or clipboard option
+        self.text_label = ttk.Label(root, text="Text to type or select 'Copy from Clipboard':")
+        self.text_label.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        self.text_entry = ttk.Entry(root, textvariable=self.text_to_type, width=30)
+        self.text_entry.grid(row=0, column=1, padx=10, pady=5)
+        self.clipboard_checkbox = ttk.Checkbutton(root, text="Copy from Clipboard", command=self.get_clipboard_text)
+        self.clipboard_checkbox.grid(row=0, column=2, padx=10, pady=5, sticky="w")
 
-        # Label and entry for typing speed
-        speed_label = Label(text="Enter the typing speed (characters per second):")
-        layout.add_widget(speed_label)
-        self.speed_entry = TextInput(multiline=False)
-        layout.add_widget(self.speed_entry)
+        # Entry for typing speed
+        self.speed_label = ttk.Label(root, text="Typing speed (words per minute):")
+        self.speed_label.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        self.speed_entry = ttk.Entry(root, textvariable=self.speed, width=10)
+        self.speed_entry.grid(row=1, column=1, padx=10, pady=5)
 
-        # Start and stop buttons
-        self.start_button = Button(text="Start Typing")
-        self.start_button.bind(on_press=self.start_typing)
-        layout.add_widget(self.start_button)
+        # Entry for delay time
+        self.delay_label = ttk.Label(root, text="Delay time (in seconds):")
+        self.delay_label.grid(row=2, column=0, padx=10, pady=5, sticky="w")
+        self.delay_entry = ttk.Entry(root, textvariable=self.delay, width=10)
+        self.delay_entry.grid(row=2, column=1, padx=10, pady=5)
 
-        self.stop_button = Button(text="Stop Typing", disabled=True)
-        self.stop_button.bind(on_press=self.stop_typing)
-        layout.add_widget(self.stop_button)
+        # Buttons
+        self.start_button = ttk.Button(root, text="Start Autotyping", command=self.start_autotyping)
+        self.start_button.grid(row=3, column=0, columnspan=3, pady=10, sticky="we")
 
-        # Progress bar
-        self.progress_bar = ProgressBar(max=100)
-        layout.add_widget(self.progress_bar)
+        self.stop_button = ttk.Button(root, text="Stop Autotyping", command=self.stop_autotyping)
+        self.stop_button.grid(row=4, column=0, columnspan=3, pady=5, sticky="we")
 
-        return layout
+        # Initialize speech recognition
+        self.recognizer = sr.Recognizer()
 
-    def start_typing(self, instance):
-        # Get text and speed from entries
-        self.text_to_type = self.text_entry.text
-        typing_speed_str = self.speed_entry.text
-
-        # Validate speed input
+    def get_clipboard_text(self):
         try:
-            self.typing_speed = float(typing_speed_str)
-            if self.typing_speed <= 0:
-                raise ValueError("Speed must be positive")
-        except ValueError as e:
-            self.show_popup("Error", f"Invalid typing speed: {e}")
-            return
+            self.text_to_type.set(self.root.clipboard_get())
+        except tk.TclError:
+            print("Failed to get text from clipboard.")
 
-        # Disable the start button and enable the stop button
-        self.start_button.disabled = True
-        self.stop_button.disabled = False
+    def start_autotyping(self):
+        text_to_type = self.get_text_to_type()
+        speed = float(self.speed.get())
+        delay_time = float(self.delay.get())
 
-        # Start typing process in a separate thread
-        self.typing_process = Clock.schedule_once(self.type_text, 1)
+        self.root.iconify()  # Iconify (minimize) the main window during autotyping
 
-    def type_text(self, dt):
-        # Copy text to clipboard and type it out
-        pyperclip.copy(self.text_to_type)
+        # Countdown before autotyping starts
+        for i in range(int(delay_time), 0, -1):
+            self.root.title(f"Autotyping in {i} seconds...")
+            self.root.update()
+            time.sleep(1)
 
-        # Calculate the total time needed
-        total_time = len(self.text_to_type) / self.typing_speed
+        # Calculate typing duration based on speed
+        words_per_second = speed / 60
+        typing_duration = len(text_to_type.split()) / words_per_second
 
-        # Start typing with a progress bar
-        for _ in tqdm(range(int(total_time * 10)), position=1, leave=False):
-            pyautogui.typewrite(pyperclip.paste(), interval=0.1 / self.typing_speed)
-            self.progress_value = (_ + 1) * 100 / (total_time * 10)
-            self.progress_bar.value = self.progress_value
+        # Type the text at the current cursor position using a separate thread
+        autotype_thread = threading.Thread(target=self.autotype_thread, args=(text_to_type, typing_duration))
+        autotype_thread.start()
 
-        # Enable the start button and disable the stop button
-        self.start_button.disabled = False
-        self.stop_button.disabled = True
+    def stop_autotyping(self):
+        pyautogui.typewrite("")  # Stop autotyping
+        self.root.deiconify()  # Deiconify (restore) the main window
+        self.root.title("AutoTyper")  # Reset window title
 
-        # Reset progress bar
-        self.progress_value = 0
-        self.progress_bar.value = 0
+    def autotype_thread(self, text_to_type, typing_duration):
+        # Type the text at the current cursor position
+        pyautogui.typewrite(text_to_type, interval=0.1)  # You can adjust the interval if needed
+        time.sleep(typing_duration)  # Wait for the typing to complete
 
-    def stop_typing(self, instance):
-        # Cancel the typing process and enable the start button
-        Clock.unschedule(self.typing_process)
-        self.start_button.disabled = False
-        self.stop_button.disabled = True
+        # Restore the main window after autotyping
+        self.root.deiconify()
+        self.root.title("AutoTyper")  # Reset window title
 
-        # Reset progress bar
-        self.progress_value = 0
-        self.progress_bar.value = 0
+        print("Autotyping completed.")
 
-    def show_popup(self, title, message):
-        content = BoxLayout(orientation='vertical')
-        content.add_widget(Label(text=message))
-        close_button = Button(text="Close")
-        close_button.bind(on_press=lambda *args: popup.dismiss())
-        content.add_widget(close_button)
+    def get_text_to_type(self):
+        # Get text from the entry field
+        return self.text_to_type.get()
 
-        popup = Popup(title=title, content=content, size_hint=(None, None), size=(300, 150))
-        popup.open()
+def main():
+    root = tk.Tk()
+    app = AutoTyperApp(root)
+    root.mainloop()
 
-if __name__ == '__main__':
-    AutotyperApp().run()
+if __name__ == "__main__":
+    main()
